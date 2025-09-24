@@ -9,8 +9,9 @@
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container-fluid">
-        <a class="navbar-brand" href="{{ url_for('list_tickets') }}">
-          Tickets
+        <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('list_tickets') }}">
+          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="logo" style="height:28px;" />
+          <span>Tickets</span>
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
@@ -20,6 +21,9 @@
             {% if current_user.is_authenticated %}
               <li class="nav-item"><a class="nav-link" href="{{ url_for('list_tickets') }}">Mis tickets</a></li>
               <li class="nav-item"><a class="nav-link" href="{{ url_for('new_ticket') }}">Nuevo</a></li>
+              {% if current_user.role in ['admin','supervisor'] %}
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
+              {% endif %}
               {% if current_user.role == 'admin' %}
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">&nbsp;Usuarios</a></li>
               {% endif %}

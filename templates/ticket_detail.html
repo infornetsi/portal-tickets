@@ -17,6 +17,7 @@
           <p><strong>Prioridad:</strong> {{ ticket.priority }}</p>
           <p><strong>Asignado a:</strong> {{ ticket.technician.name if ticket.technician else '—' }}</p>
           <p><strong>Creador:</strong> {{ ticket.creator.name }}</p>
+          <p><strong>Cerrado:</strong> {{ ticket.closed_at.strftime('%Y-%m-%d %H:%M') if ticket.closed_at else '—' }}</p>
         {% else %}
           <form method="post">
             <div class="mb-3">

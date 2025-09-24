@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Dashboard</h3>
+<div class="row g-3">
+  <div class="col-md-3">
+    <div class="card"><div class="card-body">
+      <div class="h6 text-muted">Tickets totales</div>
+      <div class="display-6">{{ total }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card"><div class="card-body">
+      <div class="h6 text-muted">Creados (7 días)</div>
+      <div class="display-6">{{ creados_7 }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card"><div class="card-body">
+      <div class="h6 text-muted">Cerrados (7 días)</div>
+      <div class="display-6">{{ cerrados_7 }}</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="row g-3 mt-3">
+  <div class="col-md-6">
+    <div class="card"><div class="card-body">
+      <h5 class="card-title">Por estado</h5>
+      <ul class="list-group">
+        {% for k, v in por_estado.items() %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ k }} <span class="badge text-bg-secondary">{{ v }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div></div>
+  </div>
+  <div class="col-md-6">
+    <div class="card"><div class="card-body">
+      <h5 class="card-title">Por prioridad</h5>
+      <ul class="list-group">
+        {% for k, v in por_prioridad.items() %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ k }} <span class="badge text-bg-secondary">{{ v }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

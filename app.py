@@ -1,4 +1,5 @@
 import os
+import re
 import datetime as dt
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, abort
@@ -8,16 +9,33 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from markupsafe import Markup, escape
+from sqlalchemy import text
+from flask_mail import Mail, Message
 
 # -------------------- Configuración --------------------
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "cambia-esto-en-render")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///tickets.db")
+
+# Normaliza postgres:// a postgresql:// y usa SQLite por defecto
+raw_db_url = os.environ.get("DATABASE_URL", "sqlite:///tickets.db")
+if raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = raw_db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# Email (Flask-Mail)
+app.config["MAIL_SERVER"]   = os.environ.get("MAIL_SERVER", "")
+app.config["MAIL_PORT"]     = int(os.environ.get("MAIL_PORT", "587"))
+app.config["MAIL_USERNAME"] = os.environ.get("MAIL_USERNAME", "")
+app.config["MAIL_PASSWORD"] = os.environ.get("MAIL_PASSWORD", "")
+app.config["MAIL_USE_TLS"]  = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+app.config["MAIL_USE_SSL"]  = os.environ.get("MAIL_USE_SSL", "false").lower() == "true"
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", app.config.get("MAIL_USERNAME", ""))
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+mail = Mail(app)
 
 ROLES = ["admin", "supervisor", "tecnico", "usuario"]
 ESTADOS = ["abierto", "en_progreso", "resuelto", "cerrado"]
@@ -60,15 +78,12 @@ class Ticket(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     assigned_to = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=dt.datetime.utcnow)
-    updated_at = db.Column(
-        db.DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow
-    )
-
+    updated_at = db.Column(db.DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    closed_at = db.Column(db.DateTime, nullable=True)  # NUEVO
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
-
 
 # -------------------- Utilidades --------------------
 def roles_required(*roles):
@@ -83,26 +98,38 @@ def roles_required(*roles):
         return wrapper
     return decorator
 
-
 def init_app():
     with app.app_context():
         db.create_all()
+        # Migración rápida: añadir closed_at si no existe (PostgreSQL)
+        try:
+            db.session.execute(text("ALTER TABLE ticket ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         # Crear admin inicial si hay variables de entorno
         admin_email = os.environ.get("ADMIN_EMAIL")
         admin_pass = os.environ.get("ADMIN_PASSWORD")
         admin_name = os.environ.get("ADMIN_NAME", "Administrador")
         if admin_email and admin_pass:
-            existing = db.session.execute(
-                db.select(User).filter_by(email=admin_email)
-            ).scalar_one_or_none()
+            existing = db.session.execute(db.select(User).filter_by(email=admin_email)).scalar_one_or_none()
             if not existing:
                 admin = User(name=admin_name, email=admin_email, role="admin")
                 admin.set_password(admin_pass)
                 db.session.add(admin)
                 db.session.commit()
 
-
 init_app()
+
+def send_email(recipients, subject, body):
+    try:
+        recips = [r for r in recipients if r]
+        if not recips:
+            return
+        msg = Message(subject=subject, recipients=recips, body=body)
+        mail.send(msg)
+    except Exception as e:
+        app.logger.warning(f"Email no enviado: {e}")
 
 # -------------------- Rutas públicas --------------------
 @app.route("/")
@@ -110,7 +137,6 @@ def index():
     if current_user.is_authenticated:
         return redirect(url_for("list_tickets"))
     return redirect(url_for("login"))
-
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -124,13 +150,11 @@ def login():
         flash("Credenciales incorrectas", "danger")
     return render_template("login.html")
 
-
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("login"))
-
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -153,7 +177,6 @@ def register():
             return redirect(url_for("login"))
     return render_template("register.html")
 
-
 # -------------------- Tickets --------------------
 @app.route("/tickets")
 @login_required
@@ -165,10 +188,8 @@ def list_tickets():
         stmt = stmt.filter(Ticket.assigned_to == current_user.id)
     else:  # usuario
         stmt = stmt.filter(Ticket.created_by == current_user.id)
-
     tickets = db.session.execute(stmt).scalars().all()
     return render_template("tickets.html", tickets=tickets, ESTADOS=ESTADOS)
-
 
 @app.route("/tickets/nuevo", methods=["GET", "POST"])
 @login_required
@@ -184,9 +205,15 @@ def new_ticket():
             db.session.add(t)
             db.session.commit()
             flash("Ticket creado.", "success")
+            # Notificar al creador
+            creator = current_user
+            send_email(
+                recipients=[creator.email],
+                subject=f"[Tickets] Ticket #{t.id} creado: {t.title}",
+                body=f"Hola {creator.name},\n\nTu ticket #{t.id} ha sido creado con estado '{t.status}'.\nTítulo: {t.title}\n\nSaludos."
+            )
             return redirect(url_for("list_tickets"))
     return render_template("ticket_detail.html", ticket=None, ESTADOS=ESTADOS, tecnicos=_tecnicos())
-
 
 @app.route("/tickets/<int:ticket_id>")
 @login_required
@@ -197,7 +224,6 @@ def ticket_detail(ticket_id):
     if not _puede_ver(ticket):
         abort(403)
     return render_template("ticket_detail.html", ticket=ticket, ESTADOS=ESTADOS, tecnicos=_tecnicos())
-
 
 @app.route("/tickets/<int:ticket_id>/asignar", methods=["POST"])
 @login_required
@@ -217,7 +243,6 @@ def assign_ticket(ticket_id):
             flash("Ticket asignado.", "success")
     return redirect(url_for("ticket_detail", ticket_id=ticket.id))
 
-
 @app.route("/tickets/<int:ticket_id>/estado", methods=["POST"])
 @login_required
 def change_status(ticket_id):
@@ -234,13 +259,27 @@ def change_status(ticket_id):
         current_user.role == "tecnico" and ticket.assigned_to == current_user.id
     ):
         ticket.status = new_status
+        # Marcar fecha de cierre si corresponde
+        if new_status in ("resuelto", "cerrado"):
+            ticket.closed_at = dt.datetime.utcnow()
+        else:
+            ticket.closed_at = None
         db.session.commit()
         flash("Estado actualizado.", "success")
+
+        # Notificar a creador y técnico (si existe)
+        creator_email = ticket.creator.email
+        tech_email = ticket.technician.email if ticket.technician else None
+        closed_info = f"\nCerrado en: {ticket.closed_at.strftime('%Y-%m-%d %H:%M UTC')}" if ticket.closed_at else ""
+        send_email(
+            recipients=[creator_email, tech_email] if tech_email else [creator_email],
+            subject=f"[Tickets] Ticket #{ticket.id} ahora está '{ticket.status}'",
+            body=f"Actualización del ticket #{ticket.id} - {ticket.title}\n\nNuevo estado: {ticket.status}{closed_info}\n"
+        )
     else:
         abort(403)
 
     return redirect(url_for("ticket_detail", ticket_id=ticket.id))
-
 
 @app.route("/tickets/<int:ticket_id>/eliminar", methods=["POST"])
 @login_required
@@ -253,7 +292,6 @@ def delete_ticket(ticket_id):
     db.session.commit()
     flash("Ticket eliminado.", "success")
     return redirect(url_for("list_tickets"))
-
 
 # -------------------- Administración --------------------
 @app.route("/admin/usuarios", methods=["GET", "POST"])
@@ -274,11 +312,27 @@ def manage_users():
     users = db.session.execute(db.select(User).order_by(User.name)).scalars().all()
     return render_template("users.html", users=users, ROLES=ROLES)
 
+# -------------------- Dashboard --------------------
+@app.route("/dashboard")
+@login_required
+@roles_required("admin", "supervisor")
+def dashboard():
+    total = db.session.execute(db.select(db.func.count(Ticket.id))).scalar() or 0
+    por_estado = dict(db.session.execute(db.select(Ticket.status, db.func.count()).group_by(Ticket.status)).all())
+    por_prioridad = dict(db.session.execute(db.select(Ticket.priority, db.func.count()).group_by(Ticket.priority)).all())
+    seven = dt.datetime.utcnow() - dt.timedelta(days=7)
+    creados_7 = db.session.execute(db.select(db.func.count()).where(Ticket.created_at >= seven)).scalar() or 0
+    cerrados_7 = db.session.execute(db.select(db.func.count()).where(Ticket.closed_at != None, Ticket.closed_at >= seven)).scalar() or 0  # noqa: E711
+    return render_template("dashboard.html",
+                           total=total,
+                           por_estado=por_estado,
+                           por_prioridad=por_prioridad,
+                           creados_7=creados_7,
+                           cerrados_7=cerrados_7)
 
 # -------------------- Helpers --------------------
 def _tecnicos():
     return db.session.execute(db.select(User).filter_by(role="tecnico").order_by(User.name)).scalars().all()
-
 
 def _puede_ver(ticket: Ticket) -> bool:
     if current_user.role in ("admin", "supervisor"):
@@ -288,7 +342,8 @@ def _puede_ver(ticket: Ticket) -> bool:
     # usuario
     return ticket.created_by == current_user.id
 
-
 # -------------------- Entrada WSGI --------------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # Render necesita escuchar en $PORT
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)
