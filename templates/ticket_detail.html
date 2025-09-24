@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block content %}
+{% if ticket %}
+  <h3>Ticket #{{ ticket.id }} — {{ ticket.title }}</h3>
+  <p class="text-muted">Creado: {{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+{% else %}
+  <h3>Nuevo ticket</h3>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        {% if ticket %}
+          <p><strong>Descripción:</strong><br/>{{ ticket.description | nl2br }}</p>
+          <p><strong>Estado:</strong> <span class="badge text-bg-secondary">{{ ticket.status }}</span></p>
+          <p><strong>Prioridad:</strong> {{ ticket.priority }}</p>
+          <p><strong>Asignado a:</strong> {{ ticket.technician.name if ticket.technician else '—' }}</p>
+          <p><strong>Creador:</strong> {{ ticket.creator.name }}</p>
+        {% else %}
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Título</label>
+              <input class="form-control" name="title" required />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Descripción</label>
+              <textarea class="form-control" name="description" rows="6" required></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Prioridad</label>
+              <select class="form-select" name="priority">
+                <option value="baja">baja</option>
+                <option value="media" selected>media</option>
+                <option value="alta">alta</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" type="submit">Crear</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if ticket %}
+  <div class="col-md-4">
+    <div class="card mb-3">
+      <div class="card-header">Cambiar estado</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('change_status', ticket_id=ticket.id) }}">
+          <div class="input-group">
+            <select class="form-select" name="status">
+              {% for s in ESTADOS %}
+                <option value="{{ s }}" {% if s==ticket.status %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-outline-primary" type="submit">Actualizar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {% if current_user.role in ['admin','supervisor'] %}
+    <div class="card mb-3">
+      <div class="card-header">Asignar técnico</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('assign_ticket', ticket_id=ticket.id) }}">
+          <div class="input-group">
+            <select class="form-select" name="assigned_to">
+              <option value="">— Sin asignar —</option>
+              {% for u in tecnicos %}
+                <option value="{{ u.id }}" {% if ticket.technician and ticket.technician.id==u.id %}selected{% endif %}>{{ u.name }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-outline-primary" type="submit">Asignar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if current_user.role == 'admin' %}
+    <div class="card">
+      <div class="card-header text-danger">Acciones peligrosas</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('delete_ticket', ticket_id=ticket.id) }}" onsubmit="return confirm('¿Eliminar este ticket?');">
+          <button class="btn btn-danger w-100" type="submit">Eliminar ticket</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Usuarios</h3>
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Nombre</th>
+        <th>Correo</th>
+        <th>Rol</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td>
+          <form method="post" class="d-flex gap-2 align-items-center">
+            <input type="hidden" name="user_id" value="{{ u.id }}" />
+            <select class="form-select" name="role">
+              {% for r in ROLES %}
+                <option value="{{ r }}" {% if u.role==r %}selected{% endif %}>{{ r }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-outline-primary" type="submit">Guardar</button>
+          </form>
+        </td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
